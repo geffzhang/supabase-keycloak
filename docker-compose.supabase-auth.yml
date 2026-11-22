@@ -16,13 +16,13 @@ services:
       # ── 把 Keycloak 配成 GoTrue 的一个 OIDC provider ──
       GOTRUE_EXTERNAL_KEYCLOAK_ENABLED: "true"
       GOTRUE_EXTERNAL_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-supabase}
-      GOTRUE_EXTERNAL_KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET:?set KEYCLOAK_CLIENT_SECRET in .env}
+      GOTRUE_EXTERNAL_KEYCLOAK_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
       # GoTrue 会拼成 <API_EXTERNAL_URL>/callback
-      GOTRUE_EXTERNAL_KEYCLOAK_REDIRECT_URI: ${API_EXTERNAL_URL:?set API_EXTERNAL_URL in .env}/callback
+      GOTRUE_EXTERNAL_KEYCLOAK_REDIRECT_URI: ${API_EXTERNAL_URL:-http://localhost:8000/auth/v1}/callback
       # 必须是 issuer 形式 <host>/realms/<realm>，不能带 /auth 前缀（Keycloak 17+ 已去掉）
-      GOTRUE_EXTERNAL_KEYCLOAK_URL: https://${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}/realms/${KEYCLOAK_REALM:-supabase}
+      GOTRUE_EXTERNAL_KEYCLOAK_URL: ${KC_SCHEME:-https}://${KEYCLOAK_HOST:-localhost:8081}/realms/${KEYCLOAK_REALM:-supabase}
       # Keycloak 22+ 不传 openid 会在 authorize 阶段直接失败
       GOTRUE_EXTERNAL_KEYCLOAK_SCOPES: openid
-      GOTRUE_SITE_URL: ${SITE_URL:?set SITE_URL in .env}
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
       # 前端域名白名单，逗号分隔且**不带结尾斜杠**，否则 redirect_to 会被拒
       GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-}

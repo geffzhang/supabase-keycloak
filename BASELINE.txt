@@ -1,0 +1,17 @@
+SUPABASE_DOCKER_BASELINE=supabase/supabase@4ead4b092ee7e5ad4def2cd295b14492db12720b
+BASELINE_PATH_IN_REPO=docker/
+KC_IMAGE=quay.io/keycloak/keycloak:26.0
+
+# docker-compose.yml 与 volumes/ 是上面那个 commit 的**原样副本，未做任何修改**。
+# 针对 Keycloak 集成所需的所有改动都在覆盖文件里：
+#   docker-compose.keycloak.yml             Keycloak 服务 + 方案 B 注入 + 安全加固
+#   docker-compose.supabase-thirdparty.yml  仅 rest/storage/realtime 的 JWKS 注入
+#   docker-compose.supabase-auth.yml        仅方案 A 的 GoTrue provider 配置
+#
+# 升级 Supabase：
+#   1. 用新 commit 的 docker/ 覆盖本目录的 docker-compose.yml 与 volumes/
+#   2. 跑 scripts/verify.sh 确认判据仍全绿（尤其 storage 与官方的变量契约可能变）
+#   3. 若报错，对照 docker-compose.keycloak.yml 里的注释逐项核对
+#
+# 好处：无需 diff 自己改了什么，基线永远干净可替换。
+# 注意：volumes/db/data 是运行时数据目录，仓库里只有 .gitkeep，切勿提交本地数据。

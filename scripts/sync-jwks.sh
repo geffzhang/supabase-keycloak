@@ -20,14 +20,42 @@
 #   JWKS_URL=http://127.0.0.1:8080/realms/supabase/protocol/openid-connect/certs ./sync-jwks.sh
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 ENV_FILE="${ENV_FILE:-.env}"
 REALM="${KEYCLOAK_REALM:-supabase}"
+
+# 从 .env 读一个键（去掉可能的引号）。.env 是唯一事实来源，
+# 避免调用方必须先把所有变量 export 到 shell。
+env_get() {
+  python - "$ENV_FILE" "$1" <<'PY'
+import re, sys
+try:
+    text = open(sys.argv[1], encoding="utf-8").read()
+except FileNotFoundError:
+    sys.exit(0)
+m = re.search(r"^%s=(.*)$" % re.escape(sys.argv[2]), text, re.M)
+if not m:
+    sys.exit(0)
+v = m.group(1).strip()
+if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+    v = v[1:-1]
+print(v)
+PY
+}
 
 if [ -n "${JWKS_URL:-}" ]; then
   :
 else
-  : "${KEYCLOAK_HOST:?set KEYCLOAK_HOST 或直接给 JWKS_URL}"
-  JWKS_URL="https://${KEYCLOAK_HOST}/realms/${REALM}/protocol/openid-connect/certs"
+  KC_HOST="${KEYCLOAK_HOST:-$(env_get KEYCLOAK_HOST)}"
+  [ -n "$KC_HOST" ] || { echo "取不到 KEYCLOAK_HOST（.env 里没有）。" >&2; exit 1; }
+  # 本地自测走 http：KC_SCHEME=http。生产应保持默认 https。
+  KC_SCHEME="${KC_SCHEME:-$(env_get KC_SCHEME)}"
+  KC_SCHEME="${KC_SCHEME:-https}"
+  KC_HOST="${KC_HOST%/}"
+  # KEYCLOAK_HOST 可能带端口（localhost:8081），也可能带 scheme（误填）
+  KC_HOST="${KC_HOST#http://}"; KC_HOST="${KC_HOST#https://}"
+  JWKS_URL="${KC_SCHEME}://${KC_HOST}/realms/${REALM}/protocol/openid-connect/certs"
 fi
 
 echo "fetching ${JWKS_URL}"
@@ -47,21 +75,7 @@ print("keycloak kid: " + ", ".join(k["kid"][:8] + "/" + k.get("alg", "?") for k 
 
 # JWT_SECRET 缺了不许继续：没有它 anon / service_role 会全部 401
 if [ -z "${JWT_SECRET:-}" ]; then
-  JWT_SECRET=$(python - "$ENV_FILE" <<'PY'
-import re, sys
-try:
-    text = open(sys.argv[1], encoding="utf-8").read()
-except FileNotFoundError:
-    sys.exit(0)
-m = re.search(r"^JWT_SECRET=(.*)$", text, re.M)
-if not m:
-    sys.exit(0)
-v = m.group(1).strip()
-if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
-    v = v[1:-1]
-print(v)
-PY
-)
+  JWT_SECRET=$(env_get JWT_SECRET)
 fi
 
 if [ -z "${JWT_SECRET:-}" ]; then
@@ -83,8 +97,20 @@ k = base64.urlsafe_b64encode(secret.encode("utf-8")).decode().rstrip("=")
 legacy = {"kty": "oct", "k": k, "alg": "HS256"}
 
 # 幂等：重跑时不能把上次写的 oct 密钥重复堆进去
-merged = [key for key in (kc.get("keys") or []) if key.get("kty") != "oct"]
-merged.append(legacy)
+# Keycloak 的 realm 会同时导出两类密钥：
+#   use=sig  → 签发 token，RS256/ES256     ← 只有这类能验签
+#   use=enc  → 加密（RSA-OAEP），跟验签无关  ← 必须剔除
+# 不剔除的话 JWKS 里混入 RSA-OAEP，部分验签库会因
+# "找不到可用算法"或"kid 匹配到错的 key"而整体拒绝。
+signing = [
+    key for key in (kc.get("keys") or [])
+    if key.get("kty") != "oct"
+    and key.get("use", "sig") == "sig"
+    and key.get("alg", "").startswith(("RS", "ES", "PS"))
+]
+if not signing:
+    sys.exit("Keycloak JWKS 里没有可用的签名公钥（需 use=sig 且 alg=RS*/ES*/PS*）")
+merged = signing + [legacy]
 
 jwks = json.dumps({"keys": merged}, separators=(",", ":"))
 if "'" in jwks:
@@ -110,7 +136,7 @@ with open(tmp, "w", encoding="utf-8", newline="\n") as f:
     f.write(content)
 os.replace(tmp, env_file)
 
-print("merged: %d 个 Keycloak 公钥 + 1 个 legacy HS256" % (len(merged) - 1))
+print("merged: %d 个签名公钥 + 1 个 legacy HS256" % len(signing))
 print("kty: " + ", ".join(key.get("kty", "?") for key in merged))
 PY
 

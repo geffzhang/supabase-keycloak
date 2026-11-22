@@ -13,8 +13,14 @@
   "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
-      { "name": "app_user", "description": "普通业务用户" },
-      { "name": "app_admin", "description": "业务管理员" }
+      {
+        "name": "app_user",
+        "description": "普通业务用户"
+      },
+      {
+        "name": "app_admin",
+        "description": "业务管理员"
+      }
     ]
   },
   "clientScopes": [
@@ -150,6 +156,24 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "supabase-verify",
+      "name": "仅供本地验证脚本（password grant）",
+      "description": "scripts/verify.sh 用它直取 token 验证整条链路。生产环境请禁用或删除此 client。",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8000/*"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
     }
   ],
   "users": [
@@ -162,9 +186,15 @@
       "firstName": "Demo",
       "lastName": "User",
       "credentials": [
-        { "type": "password", "value": "CHANGE_ME_demo_password", "temporary": false }
+        {
+          "type": "password",
+          "value": "CHANGE_ME_demo_password",
+          "temporary": false
+        }
       ],
-      "realmRoles": ["app_user"]
+      "realmRoles": [
+        "app_user"
+      ]
     }
   ],
   "defaultDefaultClientScopes": [

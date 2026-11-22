@@ -18,15 +18,24 @@ services:
   rest:
     environment:
       # PostgREST 接受字符串 secret / 单个 JWK / JWKS，这里传合并后的 JWKS
-      PGRST_JWT_SECRET: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+      PGRST_JWT_SECRET: ${KEYCLOAK_JWKS:-}
       # 数据库函数里 current_setting('app.settings.jwt_secret') 读它，
       # Supabase 的部分内置函数依赖这个设置
-      PGRST_APP_SETTINGS_JWT_SECRET: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+      PGRST_APP_SETTINGS_JWT_SECRET: ${KEYCLOAK_JWKS:-}
 
   storage:
     environment:
-      JWT_JWKS: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+      # 验 Keycloak 的 RS256 用户 token
+      JWT_JWKS: ${KEYCLOAK_JWKS:-}
+      # 验 anon / service_role 的 HS256 token
+      AUTH_JWT_SECRET: ${JWT_SECRET:-}
+      # ⚠️ storage-api 的配置读取器要求这个必须有值，缺了直接抛
+      # `${key} is undefined` 然后反复重启（日志里能看到 PGRST_JWT_SECRET）。
+      PGRST_JWT_SECRET: ${KEYCLOAK_JWKS:-}
 
   realtime:
     environment:
-      API_JWT_JWKS: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+      API_JWT_JWKS: ${KEYCLOAK_JWKS:-}
+      # 刻意保留 HS256 密钥：官方 realtime 的 healthcheck 用
+      # `Authorization: Bearer $ANON_KEY` 自检，清空会永远 unhealthy。
+      API_JWT_SECRET: ${JWT_SECRET:-}

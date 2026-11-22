@@ -399,3 +399,34 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# ── 本项目：密钥 ────────────────────────────────────────────────
+# .env 由 scripts/init-env.sh 生成，含 Postgres/Keycloak 口令与 JWT_SECRET。
+# 一旦提交就等于公开所有密钥。示例文件要保留。
+.env
+.env.local
+!.env.example
+
+# ── 本项目：运行时数据（绝不能提交）─────────────────────────────
+# volumes/db/data 是 Postgres 数据目录。**不要在这里放任何占位文件** ——
+# initdb 要求目录为空，连 .gitkeep 都会让它报
+# "contains a dot-prefixed/invisible file" 然后容器永远 unhealthy。
+# 目录由 Docker 在首次启动时自动创建。
+volumes/db/data
+
+# 本地跑起来后 Supabase 会往这些目录写东西
+volumes/storage/*
+!volumes/storage/.gitkeep
+volumes/snippets/*
+!volumes/snippets/.gitkeep
+volumes/functions/main/*.generated.ts
+volumes/logs/vector.log
+
+# Keycloak 数据库卷（compose 命名卷，一般不在仓库里，兜底）
+keycloak-db-data/
+
+# ── 本项目：脚本产生的临时文件 ──────────────────────────────────
+# sync-jwks.sh / verify.sh 用 mktemp 建的临时目录
+.verify-*
+.kc-*
+*.env.tmp
