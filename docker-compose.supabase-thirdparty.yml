@@ -1,0 +1,32 @@
+# 方案 B：PostgREST / Storage / Realtime 直接信任 Keycloak 签发的 JWT。
+# 与 docker-compose.supabase-auth.yml 互斥 —— 方案 A 用那个，方案 B 用这个。
+#
+#   ./scripts/sync-jwks.sh      # 生成 KEYCLOAK_JWKS（Keycloak 公钥 + legacy HS256）
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.supabase-thirdparty.yml up -d
+#
+# ⚠️ 三处必须都配，缺一个就是半残状态：REST 能查但传不了文件、
+#    或 Realtime 订阅不上。而且三处读的都是**启动时快照**，自托管不会
+#    周期去拉 jwks_uri（只有 Cloud 的 Third-Party Auth 自动刷新）。
+#    Keycloak 轮换密钥后必须重跑 sync-jwks.sh 并 --force-recreate 三个服务。
+#
+# ⚠️ KEYCLOAK_JWKS 里同时含 Keycloak 公钥和 JWT_SECRET 的 oct 密钥。
+#    别只放 Keycloak 的公钥 —— 那样 anon / service_role 的 HS256 token
+#    验不过，未登录请求和 Dashboard 会全线 401。
+
+services:
+  rest:
+    environment:
+      # PostgREST 接受字符串 secret / 单个 JWK / JWKS，这里传合并后的 JWKS
+      PGRST_JWT_SECRET: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+      # 数据库函数里 current_setting('app.settings.jwt_secret') 读它，
+      # Supabase 的部分内置函数依赖这个设置
+      PGRST_APP_SETTINGS_JWT_SECRET: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+
+  storage:
+    environment:
+      JWT_JWKS: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}
+
+  realtime:
+    environment:
+      API_JWT_JWKS: ${KEYCLOAK_JWKS:?run scripts/sync-jwks.sh first}

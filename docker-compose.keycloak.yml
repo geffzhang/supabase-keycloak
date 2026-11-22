@@ -1,0 +1,64 @@
+# 独立启动 Keycloak + 它自己的 Postgres。
+#   docker compose -f docker-compose.keycloak.yml up -d
+#
+# 若要和官方自托管 Supabase 一起跑，再叠加 supabase 侧覆盖文件：
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.keycloak.yml \
+#                  -f docker-compose.supabase-auth.yml up -d
+#
+# 注意：Keycloak 26 镜像基于 ubi-micro，没有 curl/bash/openssl，
+# 所以这里不写容器内 healthcheck——任何依赖 curl 的探活都会永远 unhealthy。
+# 就绪判断交给 scripts/wait-keycloak.sh 从宿主机探 /health/ready。
+
+services:
+  keycloak-db:
+    image: postgres:15-alpine
+    container_name: keycloak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: keycloak
+    restart: unless-stopped
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    command:
+      - start
+      # 对外完整地址，决定 token 里的 iss —— 必须与浏览器地址栏逐字一致
+      - --hostname=https://${KEYCLOAK_HOST:?set KEYCLOAK_HOST in .env}
+      # 反代后面必须开，否则 iss 退化成 http://keycloak:8080，验签通过但 iss 对不上
+      - --proxy-headers=xforwarded
+      - --http-enabled=true
+      - --http-port=8080
+      - --health-enabled=true
+      # 启动时导入 realm；已存在则跳过，不覆盖线上配置
+      - --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:?set KEYCLOAK_ADMIN in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      # 只绑本地，公网入口交给同一个反向代理，避免 CORS 与混合内容
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  keycloak-db-data:
