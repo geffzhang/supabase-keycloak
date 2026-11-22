@@ -34,6 +34,17 @@
       },
       "protocolMappers": [
         {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
           "name": "role-hardcoded",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-hardcoded-claim-mapper",
@@ -73,6 +84,34 @@
             "id.token.claim": "false",
             "userinfo.token.claim": "false"
           }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "preferred_username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
         }
       ]
     }
@@ -102,9 +141,6 @@
         "post.logout.redirect.uris": "https://app.example.com/*"
       },
       "defaultClientScopes": [
-        "openid",
-        "profile",
-        "email",
         "supabase-claims"
       ],
       "optionalClientScopes": [
@@ -135,9 +171,6 @@
         "post.logout.redirect.uris": "https://app.example.com/*"
       },
       "defaultClientScopes": [
-        "openid",
-        "profile",
-        "email",
         "supabase-claims"
       ],
       "optionalClientScopes": [
@@ -173,7 +206,10 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
-      }
+      },
+      "defaultClientScopes": [
+        "supabase-claims"
+      ]
     }
   ],
   "users": [
@@ -188,22 +224,17 @@
       "credentials": [
         {
           "type": "password",
-          "value": "CHANGE_ME_demo_password",
+          "value": "demo-password-change-me",
           "temporary": false
         }
       ],
       "realmRoles": [
         "app_user"
-      ]
+      ],
+      "requiredActions": []
     }
   ],
   "defaultDefaultClientScopes": [
-    "role_list",
-    "profile",
-    "email",
-    "roles",
-    "web-origins",
-    "acr",
-    "basic"
+    "supabase-claims"
   ]
 }

@@ -13,6 +13,10 @@ KC_SCHEME="${KC_SCHEME:-https}"    # 本地 docker 用 http 自测时设 KC_SCHE
 REALM="${KEYCLOAK_REALM:-supabase}"
 KC="${KC_SCHEME}://${KC_HOST}"
 
+# Git Bash 下 /tmp 与原生 python 看到的路径不一致，临时文件放当前目录
+WORK=$(mktemp -d "./.verify-XXXXXX")
+trap 'rm -rf "$WORK"' EXIT
+
 pass() { echo "  OK   $1"; }
 fail() { echo "  FAIL $1"; exit 1; }
 
@@ -120,31 +124,38 @@ if parsed.version != 4:
 print("  OK   sub 是 UUID v%d" % parsed.version)
 ' || fail "sub 形态不满足 storage 要求"
   echo "== 4c. anon key 仍然可用（legacy 对称密钥没被挤掉）=="
-  CODE=$(curl -s -o /tmp/anon_body.txt -w '%{http_code}' --max-time 10 \
-    -H "apikey: ${SUPABASE_KEY}" "${SUPABASE_URL}/rest/v1/") || true
-  if [ "$CODE" = "200" ] || [ "$CODE" = "404" ]; then
-    pass "anon 请求被接受（HTTP ${CODE}，验签已过）"
+  # ⚠️ 不能用 /rest/v1/ 当探针：那是 OpenAPI root，官方 Envoy 网关的 RBAC
+  # 只允许 admin 级密钥，anon 必然拿到 403 "RBAC: access denied"。
+  # 那是正常设计，不是配置错误。用具体表路径才是有效判据：
+  #   验签通过 → 404（表不存在）    验签失败 → 401（JWSError）
+  CODE=$(curl -s -o "$WORK/anon_body.txt" -w '%{http_code}' --max-time 10 \
+    -H "apikey: ${SUPABASE_KEY}" "${SUPABASE_URL}/rest/v1/__verify_probe__") || true
+  if [ "$CODE" = "404" ]; then
+    pass "anon 通过验签（HTTP 404 = 探针表不存在，对称密钥有效）"
   elif [ "$CODE" = "401" ]; then
-    echo "  401 响应体:"; sed 's/^/    /' /tmp/anon_body.txt
+    echo "  401 响应体:"; sed 's/^/    /' "$WORK/anon_body.txt"
     fail "anon key 被拒 —— KEYCLOAK_JWKS 里缺少 JWT_SECRET 的 oct 密钥。
     只放 Keycloak 公钥会挤掉 anon/service_role，未登录请求与 Dashboard 全挂。
     重跑 scripts/sync-jwks.sh（它会合并 legacy 密钥）并 --force-recreate rest。"
   else
-    fail "anon 请求返回 ${CODE}"
+    fail "anon 请求返回 ${CODE}（期望 404）"
   fi
 
   echo "== 5. PostgREST 接受该 token =="
-  CODE=$(curl -s -o /tmp/pgrst_body.txt -w '%{http_code}' --max-time 10 \
+  # 同样用具体表路径：401 才是验签失败，404 说明验签已通过。
+  CODE=$(curl -s -o "$WORK/pgrst_body.txt" -w '%{http_code}' --max-time 10 \
     -H "apikey: ${SUPABASE_KEY}" \
     -H "Authorization: Bearer ${TOKEN}" \
-    "${SUPABASE_URL}/rest/v1/") || true
-  if [ "$CODE" = "200" ]; then
-    pass "PostgREST 200"
+    "${SUPABASE_URL}/rest/v1/__verify_probe__") || true
+  if [ "$CODE" = "404" ]; then
+    pass "PostgREST 接受 Keycloak token（HTTP 404 = 验签已过）"
   elif [ "$CODE" = "401" ]; then
-    echo "  401 响应体:"; sed 's/^/    /' /tmp/pgrst_body.txt
+    echo "  401 响应体:"; sed 's/^/    /' "$WORK/pgrst_body.txt"
     fail "PGRST_JWT_SECRET 与 Keycloak JWKS 不匹配，或 kid 对不上（跑 scripts/sync-jwks.sh 后重启 rest）"
+  elif [ "$CODE" = "403" ]; then
+    fail "403 RBAC —— 请求被网关拦了，检查是否误用了 /rest/v1/ root 路径"
   else
-    fail "PostgREST 返回 ${CODE}，期望 200"
+    fail "PostgREST 返回 ${CODE}，期望 404"
   fi
 
   echo "== 6. Storage 接受该 token =="

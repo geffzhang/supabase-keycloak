@@ -21,36 +21,54 @@ Token 由 Keycloak 签发、Supabase 只验不签，`auth.users` 保持空表，
 
 ## 快速开始
 
+三步，全部随机化密钥，不需要手工填 `.env`。
+
 ```bash
-cp .env.example .env && ${EDITOR:-vi} .env   # 填 4 个密码/密钥 + 域名
+# 1) 生成 .env：随机化所有口令，并用新的 JWT_SECRET 重签 ANON/SERVICE_ROLE
+./scripts/init-env.sh
 
-# 1) 起 Keycloak
-docker compose -f docker-compose.keycloak.yml up -d
-./scripts/wait-keycloak.sh
+# 2) 起 Keycloak + Supabase（自动处理顺序依赖、合并 JWKS、等健康）
+./scripts/start.sh
 
-# 2) 合并 JWKS 并起 Supabase
-./scripts/sync-jwks.sh
-docker compose -f docker-compose.yml \
-               -f docker-compose.supabase-thirdparty.yml up -d
-
-# 3) 验证
-SUPABASE_URL=https://supabase.example.com SUPABASE_KEY=<anon> \
-KEYCLOAK_HOST=kc.example.com \
-KC_TEST_USER=demo KC_TEST_PASS=<密码> KEYCLOAK_CLIENT_ID=supabase \
+# 3) 端到端验证
+KC_TEST_USER=demo KC_TEST_PASS=demo-password-change-me \
+KEYCLOAK_CLIENT_ID=supabase-verify \
+SUPABASE_URL=http://localhost:8000 \
+SUPABASE_KEY=$(grep '^ANON_KEY=' .env | cut -d= -f2) \
+KEYCLOAK_HOST=localhost:8081 KC_SCHEME=http \
 ./scripts/verify.sh b
 ```
 
-realm 导入后 client secret 与 demo 密码是占位符，**必须先改**：
-Clients → `supabase` → Credentials → Regenerate；Users → `demo` → Credentials。
+期望最后一行是 `全部通过`。首次启动约 3–5 分钟（db 要跑几十个 init-script）。
+
+**`start.sh` 做了什么**（顺序是硬依赖）：
+
+1. 校验 `.env` 无重复键 —— 两份模板拼接会让空值覆盖有效值，导致全站 401
+2. 起 Keycloak，等 `/health/ready`（在 **9000** 管理口，不是 8081）
+3. `sync-jwks.sh` 把 Keycloak 公钥 + `JWT_SECRET` 的 oct 密钥**合并**成 JWKS
+4. 先单独起 db 并等健康，再起其余服务（避免 `depends_on` 卡在 db unhealthy）
+5. 等 rest / storage / realtime 健康
+
+**服务地址**：Supabase API `http://localhost:8000`（Studio 同址，Basic Auth 密码见
+`.env` 的 `DASHBOARD_PASSWORD`）、Keycloak `http://localhost:8081`（管理员见 `.env`）。
+
+realm 会自动导入，含 seed 用户 `demo`（口令 `demo-password-change-me`）与
+`supabase-verify` client（**仅供本地验证脚本，生产请删**）。
 
 ## 文件
 
 | 文件 | 作用 |
 |---|---|
+| `docker-compose.yml` | **官方基线原样副本**（supabase@4ead4b0），不要改它 |
+| `volumes/` | 官方挂载文件（envoy / db 初始化 / realtime 等 25 个）|
+| `env.template` | 官方 `.env.example` 副本，`init-env.sh` 以它为基线 |
+| `BASELINE.txt` | 基线版本与升级步骤 |
 | `docker-compose.keycloak.yml` | Keycloak + 自己的 Postgres，可独立 `up` |
 | `docker-compose.supabase-thirdparty.yml` | **方案 B**：rest/storage/realtime 注入 JWKS |
 | `docker-compose.supabase-auth.yml` | 方案 A 用（本场景不需要，保留备查）|
 | `keycloak/realm-supabase.json` | 可导入 realm：两个 client、claim mapper、固定 UUID 的 demo 用户 |
+| `scripts/init-env.sh` | 从官方模板生成 `.env`：随机化密钥、重签 ANON/SERVICE_ROLE、自检 |
+| `scripts/start.sh` | 一键启动，处理顺序依赖与健康等待 |
 | `scripts/sync-jwks.sh` | **合并** Keycloak 公钥 + legacy HS256 写入 `.env` |
 | `scripts/verify.sh` | 端到端验证（`b`），含 sub 形态与 anon 存活判据 |
 | `scripts/wait-keycloak.sh` | 探 `/health/ready`（镜像里没有 curl，从宿主机探）|
